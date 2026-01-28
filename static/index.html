@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多云聊天平台 - Multi-Cloud Chat</title>
+    <link rel="stylesheet" href="static/style.css">
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.0.0/marked.min.js"></script>
+    <!-- Lucide icons (IIFE build exposes global `lucide`) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <base id="baseHref" href="/">
+    <script>
+      // 自动适配 SCRIPT_NAME
+      const match = window.location.pathname.match(/^\/([a-zA-Z0-9_-]+)\//);
+      if (match) {
+        document.getElementById('baseHref').setAttribute('href', `/${match[1]}/`);
+      }
+    </script>
+</head>
+<body>
+        <!-- 移动端汉堡菜单按钮 -->
+        <button class="icon-button mobile-menu-btn" onclick="toggleSidebar()" style="position:fixed;top:10px;left:10px;z-index:1100;display:none;">
+            <i data-lucide="menu"></i>
+        </button>
+        <div class="app" id="app">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <img src="static/offerupup_logo.png" alt="Logo" class="logo-image" style="height: 32px; width: auto;">
+                    <span class="app-name" id="appName">多云聊天平台</span>
+                </div>
+            </div>
+
+            <button class="sidebar-button" onclick="newChat()" id="newChatBtn">
+                <i data-lucide="message-square"></i>
+                <span class="btn-text" data-i18n="newChat">新对话</span>
+            </button>
+
+            <button class="sidebar-button" onclick="openTherapist()" id="therapistBtn">
+                <i data-lucide="user"></i>
+                <span class="btn-text">心理医生</span>
+            </button>
+
+            <button class="sidebar-button" onclick="toggleImageGen()" id="imageGenBtn">
+                <i data-lucide="image"></i>
+                <span class="btn-text" data-i18n="imageGen">生成图片</span>
+            </button>
+
+            <!-- Chat History -->
+            <div class="chat-history-section">
+                <div class="section-title" data-i18n="chatHistory">聊天历史</div>
+                <div class="chat-history-list" id="chatHistoryList">
+                    <!-- History items will be inserted here -->
+                </div>
+            </div>
+
+            <div class="sidebar-spacer"></div>
+
+            <!-- Usage Quota -->
+            <div class="usage-quota" id="usageQuota" style="display: none;">
+                <div class="quota-text">
+                    <span data-i18n="freeUsage">免费配额</span>: 
+                    <span id="quotaCount">0/10</span>
+                </div>
+                <div class="quota-hint" data-i18n="quotaHint">超出后需输入自己的 API Key</div>
+            </div>
+
+            <button class="sidebar-button" onclick="toggleSettings()" id="settingsBtn">
+                <i data-lucide="settings"></i>
+                <span class="btn-text" data-i18n="settings">设置</span>
+            </button>
+
+            <div class="sidebar-controls">
+                <button class="icon-button" onclick="toggleTheme()" id="themeBtn" title="切换主题">
+                    <i data-lucide="moon" id="themeIcon"></i>
+                </button>
+                <button class="icon-button" onclick="toggleLanguage()" id="langBtn" title="切换语言">
+                    <i data-lucide="globe"></i>
+                </button>
+            </div>
+            <!-- 新增开源项目入口 -->
+            <div class="sidebar-footer">
+                <a href="https://github.com/FrankDu1/openchatbox" target="_blank" class="sidebar-link" title="开源项目">
+                    <i data-lucide="github"></i>
+                    <span class="footer-text" data-i18n="openSourceProject">开源项目</span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Settings Panel -->
+            <div class="settings-panel" id="settingsPanel" style="display: none;">
+                <button class="settings-close" onclick="toggleSettings()" title="关闭设置">
+                    <i data-lucide="x"></i>
+                </button>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color);">
+                <div class="settings-group">
+                    <label data-i18n="customEndpointUrl">API 终端地址</label>
+                    <input type="url" id="endpointUrl" placeholder="https://api.openai.com/v1" 
+                        oninput="saveEndpointUrl()" required>
+                    <small data-i18n="endpointHint">输入完整的 API 端点地址</small>
+                </div>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color);">
+                <div class="settings-group">
+                    <label data-i18n="customApiKey">API Key</label>
+                    <input type="password" id="customApiKey" placeholder="sk-xxx" 
+                        oninput="saveApiKey()" required>
+                    <small data-i18n="apiKeyHint">输入您的 API Key</small>
+                </div>
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color);">
+                <div class="settings-group">
+                    <label data-i18n="modelName">模型名称</label>
+                    <input type="text" id="customModel" placeholder="qwen-plus" 
+                        oninput="saveCustomModel()" required>
+                    <small data-i18n="modelHint">输入要使用的模型名称</small>
+                </div>
+
+                <div class="settings-group">
+                    <label>图片生成 API 终端</label>
+                    <input type="url" id="imageEndpointUrl" placeholder="https://api.openai.com/v1" 
+                        oninput="saveImageEndpointUrl()">
+                    <small>输入图片生成API的完整端点地址</small>
+                </div>
+
+                <div class="settings-group">
+                    <label>图片生成 API Key</label>
+                    <input type="password" id="imageApiKey" placeholder="sk-xxx" 
+                        oninput="saveImageApiKey()">
+                    <small>输入图片生成API的Key（可选，留空使用聊天API配置）</small>
+                </div>
+
+                <div class="settings-group">
+                    <label>图片生成模型</label>
+                    <input type="text" id="imageModel" placeholder="qwen-image-plus" 
+                        oninput="saveImageModel()">
+                    <small>输入图片生成模型的名称，如：dall-e-3, wanx-v1</small>
+                </div>
+
+                <div class="settings-group">
+                    <label>图片尺寸</label>
+                    <input type="text" id="imageSize" placeholder="1024*1024" 
+                        oninput="saveImageSize()" required>
+                    <small>1024*1024, 1328*1328</small>
+                </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="chat-area" id="chatArea">
+                <div class="welcome-screen" id="welcomeScreen">
+                    <div class="welcome-icon">
+                        <i data-lucide="sparkles" style="width: 64px; height: 64px;"></i>
+                    </div>
+                    <h1 data-i18n="title">多云聊天平台</h1>
+                    <p data-i18n="subtitle">支持阿里云通义千问和 OpenAI GPT</p>
+                </div>
+            </div>
+
+            <!-- Image Generation Area -->
+            <div class="image-gen-area" id="imageGenArea" style="display: none;">
+                <div class="image-gen-container">
+                    <h2 data-i18n="image">图片生成</h2>
+                    <textarea id="imagePrompt" rows="4" class="image-prompt-input" 
+                              data-i18n-placeholder="imagePromptPlaceholder"></textarea>
+                    <button class="generate-button" onclick="generateImage()" id="generateBtn">
+                        <span data-i18n="generateImage">生成图片</span>
+                    </button>
+                    <div class="image-gallery" id="imageGallery"></div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area" id="inputArea">
+                <div class="input-container">
+                    <textarea id="messageInput" rows="1" 
+                              data-i18n-placeholder="placeholder"
+                              oninput="autoResizeTextarea(this)"
+                              onkeydown="handleKeyDown(event)"></textarea>
+                    <button class="send-button" onclick="sendMessage()" id="sendBtn">
+                        <i data-lucide="send"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+        <script src="static/i18n.js"></script>
+        <script src="static/app.js"></script>
+        <script>
+            // 移动端显示汉堡菜单按钮
+            document.addEventListener('DOMContentLoaded', function() {
+                if (window.innerWidth <= 768) {
+                    var btn = document.querySelector('.mobile-menu-btn');
+                    if (btn) btn.style.display = 'block';
+                }
+            });
+            // 侧边栏开关
+            function toggleSidebar() {
+                var sidebar = document.querySelector('.sidebar');
+                if (sidebar) sidebar.classList.toggle('open');
+            }
+            window.toggleSidebar = toggleSidebar;
+        </script>
+</body>
+</html>
