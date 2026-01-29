@@ -460,7 +460,7 @@ async function sendMessage() {
 
         let response, data;
         if (currentAgent === 'therapist') {
-            // Use agent completion proxy on the backend
+            // Use agent completion proxy with streaming
             const agentBody = {
                 input: { prompt: message },
                 parameters: {}
@@ -471,6 +471,86 @@ async function sendMessage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(agentBody)
             });
+            
+            // Handle streaming response
+            if (response.ok && response.headers.get('content-type')?.includes('text/event-stream')) {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let accumulatedText = '';
+                
+                // Add assistant message placeholder
+                messages.push({
+                    role: 'assistant',
+                    content: ''
+                });
+                
+                // Remove thinking indicator and reuse its wrapper
+                const chatArea = document.getElementById('chatArea');
+                const thinkingIndicator = document.getElementById('thinkingIndicator');
+                let wrapper, markdownDiv;
+                
+                if (thinkingIndicator) {
+                    // Reuse existing wrapper
+                    wrapper = thinkingIndicator;
+                    wrapper.id = '';
+                    const content = wrapper.querySelector('.message-content');
+                    content.innerHTML = '';
+                    markdownDiv = document.createElement('div');
+                    markdownDiv.className = 'message-markdown';
+                    content.appendChild(markdownDiv);
+                } else {
+                    // Create new wrapper if no thinking indicator
+                    wrapper = document.createElement('div');
+                    wrapper.className = 'message-wrapper assistant';
+                    const content = document.createElement('div');
+                    content.className = 'message-content';
+                    markdownDiv = document.createElement('div');
+                    markdownDiv.className = 'message-markdown';
+                    content.appendChild(markdownDiv);
+                    wrapper.appendChild(content);
+                    chatArea.appendChild(wrapper);
+                }
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    console.log('[Stream] Received chunk:', chunk.substring(0, 100));
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.slice(6).trim();
+                            if (dataStr === '[DONE]') {
+                                console.log('[Stream] Completed');
+                                break;
+                            }
+                            try {
+                                const parsed = JSON.parse(dataStr);
+                                if (parsed.text) {
+                                    console.log('[Stream] Text chunk:', parsed.text.substring(0, 50));
+                                    accumulatedText += parsed.text;
+                                    // Update only the last message content
+                                    messages[messages.length - 1].content = accumulatedText;
+                                    markdownDiv.innerHTML = marked.parse(accumulatedText);
+                                    chatArea.scrollTop = chatArea.scrollHeight;
+                                }
+                            } catch (e) {
+                                console.error('Parse error:', e);
+                            }
+                        }
+                    }
+                }
+                
+                // Update usage and save after streaming completes
+                updateUsageQuota();
+                saveCurrentChat();
+                isLoading = false;
+                return;
+            }
+            
+            // Fallback to non-streaming
             data = await response.json();
         } else {
             const requestBody = {

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Literal, Dict
 import os
@@ -379,7 +379,7 @@ async def generate_image(request: ImageRequest, req: Request):
 
 @app.post("/api/agent-completion")
 async def agent_completion(request: AgentRequest, req: Request):
-    """Proxy endpoint for DashScope agent completion using AGENT_APP_ID and DEFAULT_AGENT_API_KEY"""
+    """Proxy endpoint for DashScope agent completion with streaming support"""
     try:
         defaults = get_default_config()
 
@@ -405,74 +405,83 @@ async def agent_completion(request: AgentRequest, req: Request):
 
         endpoint = f"https://dashscope.aliyuncs.com/api/v1/apps/{app_id}/completion"
 
+        # Enable incremental streaming output
+        params = request.parameters or {}
+        params["incremental_output"] = True
+        
         data = {
             "input": request.input,
-            "parameters": request.parameters or {},
+            "parameters": params,
             "debug": {}
         }
 
-        # Call the upstream agent endpoint
+        # Call the upstream agent endpoint with streaming
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
+            "Authorization": f"Bearer {api_key}",
+            "X-DashScope-SSE": "enable"  # Enable SSE streaming
         }
 
-        resp = requests.post(endpoint, headers=headers, json=data, timeout=60)
+        resp = requests.post(endpoint, headers=headers, json=data, timeout=120, stream=True)
         if resp.status_code >= 400:
             raise HTTPException(status_code=resp.status_code, detail=f"Agent API请求失败: {resp.text}")
 
-        result = resp.json()
-
-        # increase usage
+        # increase usage (only once at start)
         if not has_custom_key:
             increment_ip_usage(client_ip, False)
 
-        # Try to extract assistant text (support multiple DashScope response formats)
-        assistant_text = None
-        try:
-            if isinstance(result, dict):
-                out = result.get("output")
-                # Case 1: top-level 'choices' (OpenAI-like)
-                if "choices" in result and isinstance(result["choices"], list) and len(result["choices"])>0:
-                    choice0 = result["choices"][0]
-                    # common pattern: choice.message.content is string
-                    if isinstance(choice0, dict) and "message" in choice0 and isinstance(choice0["message"], dict):
-                        msg = choice0["message"]
-                        if "content" in msg and isinstance(msg["content"], str):
-                            assistant_text = msg["content"]
-                # Case 2: output is a dict with a direct "text" field
-                if assistant_text is None and isinstance(out, dict) and isinstance(out.get("text"), str):
-                    assistant_text = out.get("text")
-                # Case 3: output contains choices with message.content array
-                if assistant_text is None and isinstance(out, dict) and "choices" in out:
-                    choice = out["choices"][0]
-                    if "message" in choice and "content" in choice["message"]:
-                        contents = choice["message"]["content"]
-                        for item in contents:
-                            if isinstance(item, dict) and "text" in item:
-                                assistant_text = item["text"]
-                                break
-                # Case 4: top-level 'text' field
-                if assistant_text is None and isinstance(result.get("text"), str):
-                    assistant_text = result.get("text")
-        except Exception:
-            assistant_text = None
-
-        if assistant_text is None:
-            # Fallback: try to stringify common readable fields, otherwise return raw JSON
-            # prefer output.text if present
+        # Stream the response
+        def generate():
+            buffer = ""
             try:
-                if isinstance(result, dict):
-                    out = result.get("output")
-                    if isinstance(out, dict) and out.get("text"):
-                        assistant_text = out.get("text")
-            except Exception:
-                assistant_text = None
+                # Use iter_content to avoid buffering
+                for chunk in resp.iter_content(chunk_size=None, decode_unicode=False):
+                    if chunk:
+                        buffer += chunk.decode('utf-8')
+                        # Process complete lines
+                        while '\n' in buffer:
+                            line, buffer = buffer.split('\n', 1)
+                            line = line.strip()
+                            
+                            if line.startswith('data:'):
+                                data_str = line[5:].strip()
+                                if data_str and data_str != '[DONE]':
+                                    try:
+                                        chunk_data = json.loads(data_str)
+                                        # Extract text from the chunk
+                                        text = None
+                                        if isinstance(chunk_data, dict):
+                                            output = chunk_data.get("output", {})
+                                            if isinstance(output, dict):
+                                                # Try to get text from output.text
+                                                if "text" in output:
+                                                    text = output["text"]
+                                                # Or from output.choices
+                                                elif "choices" in output:
+                                                    choices = output["choices"]
+                                                    if isinstance(choices, list) and len(choices) > 0:
+                                                        message = choices[0].get("message", {})
+                                                        content = message.get("content")
+                                                        if isinstance(content, str):
+                                                            text = content
+                                                        elif isinstance(content, list):
+                                                            for item in content:
+                                                                if isinstance(item, dict) and "text" in item:
+                                                                    text = item["text"]
+                                                                    break
+                                        
+                                        if text:
+                                            # Send as SSE format immediately
+                                            yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+                                    except json.JSONDecodeError as e:
+                                        logging.debug(f"JSON decode error: {e}")
+            except Exception as e:
+                logging.error(f"Streaming error: {e}")
+                yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            finally:
+                yield "data: [DONE]\n\n"
 
-        if assistant_text is None:
-            return {"message": {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)}, "raw": result}
-
-        return {"message": {"role": "assistant", "content": assistant_text}}
+        return StreamingResponse(generate(), media_type="text/event-stream")
 
     except HTTPException:
         raise
