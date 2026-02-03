@@ -1,7 +1,7 @@
 // Translation data
 const translations = {
     zh: {
-        title: "多云聊天平台",
+        title: "智能伴侣",
         subtitle: "支持阿里云通义千问和 OpenAI GPT",
         placeholder: "输入消息... (Shift + Enter 换行)",
         send: "发送",
@@ -37,10 +37,27 @@ const translations = {
         quotaExceeded: "免费配额已用完，请在设置中输入自己的 API Key",
         endpointUrl: "终端 URL",
         endpointHint: "可选，留空使用默认终端",
-        openSourceProject: "开源项目"
+        login: "登录",
+        loginTitle: "登录",
+        loginSubtitle: "输入用户名和密码",
+        loginButton: "登录",
+        registerTitle: "注册",
+        registerSubtitle: "创建新账号",
+        registerButton: "注册",
+        username: "用户名",
+        password: "密码",
+        confirmPassword: "确认密码",
+        nickname: "昵称（可选）",
+        emailOptional: "邮箱（可选）",
+        noAccount: "还没有账号？",
+        registerNow: "立即注册",
+        hasAccount: "已有账号？",
+        loginNow: "立即登录",
+        psychologist: "心理医生",
+        quotaExceededLogin: "免费配额已用完，请登录后继续使用，或在设置中输入自己的 API Key"
     },
     en: {
-        title: "Multi-Cloud Chat Platform",
+        title: "AI Companion",
         subtitle: "Powered by Alibaba Qwen and OpenAI GPT",
         placeholder: "Type a message... (Shift + Enter for new line)",
         send: "Send",
@@ -76,7 +93,24 @@ const translations = {
         quotaExceeded: "Free quota exhausted, please enter your own API Key in settings",
         endpointUrl: "Endpoint URL",
         endpointHint: "Optional, leave blank to use default endpoint",
-        openSourceProject: "Open Source"
+        login: "Login",
+        loginTitle: "Login",
+        loginSubtitle: "Enter username and password",
+        loginButton: "Login",
+        registerTitle: "Register",
+        registerSubtitle: "Create new account",
+        registerButton: "Register",
+        username: "Username",
+        password: "Password",
+        confirmPassword: "Confirm Password",
+        nickname: "Nickname (Optional)",
+        emailOptional: "Email (Optional)",
+        noAccount: "Don't have an account?",
+        registerNow: "Register now",
+        hasAccount: "Already have an account?",
+        loginNow: "Login now",
+        psychologist: "Psychologist",
+        quotaExceededLogin: "Free quota exhausted. Please login to continue, or enter your own API Key in settings"
     }
 };
 

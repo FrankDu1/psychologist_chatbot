@@ -9,6 +9,9 @@ env/
 ENV/
 .env
 
+# User database
+users.db
+
 # Node
 node_modules/
 dist/

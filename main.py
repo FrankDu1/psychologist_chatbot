@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -9,9 +9,18 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from collections import defaultdict
 import logging
+from sqlalchemy.orm import Session
+import urllib.parse
+
+# 导入认证模块
+from auth import (
+    get_db, create_access_token, verify_token,
+    create_user, authenticate_user, get_user_by_id, User
+)
+
 logging.basicConfig(level=logging.DEBUG)
 
 # Load environment variables from .env file
@@ -125,6 +134,114 @@ class AgentRequest(BaseModel):
     parameters: Optional[dict] = {}
     api_key: Optional[str] = None
 
+
+class RegisterRequest(BaseModel):
+    username: str  # 用户名
+    password: str  # 密码
+    nickname: Optional[str] = None  # 昵称（可选）
+    email: Optional[str] = None  # 邮箱（可选）
+
+
+class LoginRequest(BaseModel):
+    username: str  # 用户名
+    password: str  # 密码
+
+
+def get_current_user(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)) -> Optional[User]:
+    """获取当前登录用户（可选）"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    
+    token = authorization.replace("Bearer ", "")
+    payload = verify_token(token)
+    
+    if not payload:
+        return None
+    
+    user_id = payload.get("user_id")
+    if not user_id:
+        return None
+    
+    user = get_user_by_id(db, user_id)
+    return user
+
+
+def require_auth(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)) -> User:
+    """需要认证的依赖项"""
+    user = get_current_user(authorization, db)
+    
+    if not user:
+        raise HTTPException(
+            status_code=401, 
+            detail="Not authenticated. Please login. / 未认证，请先登录。"
+        )
+    
+    return user
+
+
+def wechat_get_access_token(code: str) -> dict:
+    """通过微信授权码获取access_token"""
+    app_id = os.getenv("WECHAT_APP_ID")
+    app_secret = os.getenv("WECHAT_APP_SECRET")
+    
+    if not app_id or not app_secret:
+        raise HTTPException(
+            status_code=500, 
+            detail="WeChat not configured / 微信登录未配置"
+        )
+    
+    url = f"https://api.weixin.qq.com/sns/oauth2/access_token"
+    params = {
+        "appid": app_id,
+        "secret": app_secret,
+        "code": code,
+        "grant_type": "authorization_code"
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        
+        if "errcode" in data:
+            raise HTTPException(
+                status_code=400,
+                detail=f"WeChat auth failed / 微信认证失败: {data.get('errmsg', 'Unknown error')}"
+            )
+        
+        return data
+    except requests.RequestException as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"WeChat API request failed / 微信API请求失败: {str(e)}"
+        )
+
+
+def wechat_get_user_info(access_token: str, openid: str) -> dict:
+    """获取微信用户信息"""
+    url = "https://api.weixin.qq.com/sns/userinfo"
+    params = {
+        "access_token": access_token,
+        "openid": openid,
+        "lang": "zh_CN"
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        
+        if "errcode" in data:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to get user info / 获取用户信息失败: {data.get('errmsg', 'Unknown error')}"
+            )
+        
+        return data
+    except requests.RequestException as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"WeChat API request failed / 微信API请求失败: {str(e)}"
+        )
+
 def get_default_config():
     """从环境变量获取默认配置"""
     return {
@@ -186,8 +303,84 @@ async def get_config():
     return {
         "appName": os.getenv("APP_NAME", "多云聊天平台"),
         "appNameEn": os.getenv("APP_NAME_EN", "Multi-Cloud Chat"),
-        "dailyFreeLimit": int(os.getenv("DAILY_FREE_LIMIT", "10"))
+        "dailyFreeLimit": int(os.getenv("DAILY_FREE_LIMIT", "10")),
+        "wechatEnabled": bool(os.getenv("WECHAT_APP_ID")),
+        "wechatAppId": os.getenv("WECHAT_APP_ID", ""),
+        "requireAuth": os.getenv("REQUIRE_AUTH", "false").lower() == "true"
     }
+
+
+@app.post("/api/auth/register")
+async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    """用户注册"""
+    try:
+        user, error = create_user(
+            db,
+            username=request.username,
+            password=request.password,
+            nickname=request.nickname,
+            email=request.email
+        )
+        
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        
+        # 生成JWT token
+        jwt_token = create_access_token({"user_id": user.id})
+        
+        return {
+            "token": jwt_token,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "nickname": user.nickname,
+                "email": user.email
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Registration failed / 注册失败: {str(e)}")
+
+
+@app.post("/api/auth/login")
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """用户登录"""
+    try:
+        user, error = authenticate_user(db, request.username, request.password)
+        
+        if error:
+            raise HTTPException(status_code=401, detail=error)
+        
+        # 生成JWT token
+        jwt_token = create_access_token({"user_id": user.id})
+        
+        return {
+            "token": jwt_token,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "nickname": user.nickname,
+                "email": user.email
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed / 登录失败: {str(e)}")
+
+
+@app.get("/api/auth/me")
+async def get_current_user_info(user: User = Depends(require_auth)):
+    """获取当前用户信息"""
+    return {
+        "id": user.id,
+        "username": user.username,
+        "nickname": user.nickname,
+        "email": user.email,
+        "avatar": user.avatar
+    }
+
 
 @app.get("/api/usage")
 async def get_usage(req: Request):
@@ -213,9 +406,21 @@ async def get_models():
     }
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest, req: Request):
+async def chat(
+    request: ChatRequest, 
+    req: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
+):
     """Chat API / 聊天接口"""
     try:
+        # 检查是否需要强制认证
+        require_auth_enabled = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
+        if require_auth_enabled and not current_user:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required. Please login. / 需要登录才能使用。"
+            )
 
         defaults = get_default_config()
         # 获取客户端IP
@@ -276,9 +481,21 @@ async def chat(request: ChatRequest, req: Request):
         raise HTTPException(status_code=500, detail=f"Request failed / 请求失败: {str(e)}")
     
 @app.post("/api/generate-image")
-async def generate_image(request: ImageRequest, req: Request):
+async def generate_image(
+    request: ImageRequest, 
+    req: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
+):
     """Image generation API / 生成图片接口"""
     try:
+        # 检查是否需要强制认证
+        require_auth_enabled = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
+        if require_auth_enabled and not current_user:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required. Please login. / 需要登录才能使用。"
+            )
         defaults = get_default_config()
         
         # 获取客户端IP
@@ -378,9 +595,21 @@ async def generate_image(request: ImageRequest, req: Request):
 
 
 @app.post("/api/agent-completion")
-async def agent_completion(request: AgentRequest, req: Request):
+async def agent_completion(
+    request: AgentRequest, 
+    req: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
+):
     """Proxy endpoint for DashScope agent completion with streaming support"""
     try:
+        # 检查是否需要强制认证
+        require_auth_enabled = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
+        if require_auth_enabled and not current_user:
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required. Please login. / 需要登录才能使用。"
+            )
         defaults = get_default_config()
 
         client_ip = get_client_ip(req)

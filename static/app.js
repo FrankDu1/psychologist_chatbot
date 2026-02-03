@@ -8,9 +8,235 @@ let chatHistory = JSON.parse(localStorage.getItem('chatHistory') || '[]');
 let currentChatId = null;
 let currentAgent = 'default';
 let dailyFreeLimit = 10;
+let requireAuth = false;
+let currentUser = null;
+let authToken = localStorage.getItem('authToken');
 
 // 自动适配 SCRIPT_NAME 前缀
 const BASE = window.location.pathname.startsWith('/openchatbox/') ? '/openchatbox' : '';
+
+// 获取带认证的headers
+function getAuthHeaders() {
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    return headers;
+}
+
+// 检查登录状态
+async function checkAuth() {
+    if (!requireAuth) return true;
+    
+    if (!authToken) {
+        showLoginModal();
+        return false;
+    }
+    
+    try {
+        const resp = await fetch(`${BASE}/api/auth/me`, {
+            headers: getAuthHeaders()
+        });
+        
+        if (resp.ok) {
+            currentUser = await resp.json();
+            updateUserUI();
+            return true;
+        } else {
+            authToken = null;
+            localStorage.removeItem('authToken');
+            showLoginModal();
+            return false;
+        }
+    } catch (error) {
+        console.error('Auth check failed:', error);
+        return false;
+    }
+}
+
+// 显示登录弹窗
+function showLoginModal() {
+    document.getElementById('loginOverlay').style.display = 'flex';
+}
+
+// 隐藏登录弹窗
+function hideLoginModal() {
+    document.getElementById('loginOverlay').style.display = 'none';
+}
+
+// 更新用户UI
+function updateUserUI() {
+    const loginBtn = document.getElementById('loginBtn');
+    
+    if (!currentUser) {
+        // 未登录，显示登录按钮
+        if (loginBtn) {
+            loginBtn.style.display = 'flex';
+        }
+        // 移除用户信息
+        const userInfo = document.querySelector('.user-info');
+        if (userInfo) userInfo.remove();
+        return;
+    }
+    
+    // 已登录，隐藏登录按钮
+    if (loginBtn) {
+        loginBtn.style.display = 'none';
+    }
+    
+    const sidebar = document.querySelector('.sidebar');
+    let userInfo = document.querySelector('.user-info');
+    
+    if (!userInfo) {
+        userInfo = document.createElement('div');
+        userInfo.className = 'user-info';
+        sidebar.insertBefore(userInfo, sidebar.firstChild);
+    }
+    
+    userInfo.innerHTML = `
+        ${currentUser.avatar ? `<img src="${currentUser.avatar}" class="user-avatar" alt="Avatar">` : 
+          '<div class="user-avatar" style="background: var(--accent-color); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">' + 
+          (currentUser.nickname ? currentUser.nickname[0] : '用') + '</div>'}
+        <div class="user-details">
+            <div class="user-name">${currentUser.nickname || currentUser.phone || '用户'}</div>
+            ${currentUser.phone ? `<div class="user-phone">${currentUser.phone}</div>` : ''}
+        </div>
+        <button class="logout-btn" onclick="logout()">退出</button>
+    `;
+}
+
+// 登出
+function logout() {
+    authToken = null;
+    currentUser = null;
+    localStorage.removeItem('authToken');
+    updateUserUI();
+    if (requireAuth) {
+        showLoginModal();
+    }
+}
+
+// 显示登录表单
+function showLoginForm() {
+    document.getElementById('loginForm').style.display = 'block';
+    document.getElementById('registerForm').style.display = 'none';
+}
+
+// 显示注册表单
+function showRegisterForm() {
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('registerForm').style.display = 'block';
+}
+
+// 登录
+async function login() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    
+    if (!username || !password) {
+        alert(currentLang === 'zh' ? '请填写完整信息' : 'Please fill in all fields');
+        return;
+    }
+    
+    try {
+        const resp = await fetch(`${BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        
+        if (resp.ok) {
+            const data = await resp.json();
+            authToken = data.token;
+            localStorage.setItem('authToken', authToken);
+            currentUser = data.user;
+            updateUserUI();
+            hideLoginModal();
+            
+            // 成功提示
+            setTimeout(() => {
+                alert(currentLang === 'zh' ? 
+                    '✅ 登录成功！\n\n欢迎回来，' + data.user.nickname + '！' : 
+                    '✅ Login successful!\n\nWelcome back, ' + data.user.nickname + '!');
+            }, 300);
+        } else {
+            const error = await resp.json();
+            alert((currentLang === 'zh' ? '登录失败: ' : 'Login failed: ') + error.detail);
+        }
+    } catch (error) {
+        alert((currentLang === 'zh' ? '登录失败: ' : 'Login failed: ') + error.message);
+    }
+}
+
+// 注册
+async function register() {
+    const username = document.getElementById('registerUsername').value.trim();
+    const password = document.getElementById('registerPassword').value;
+    const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
+    const nickname = document.getElementById('registerNickname').value.trim();
+    const email = document.getElementById('registerEmail').value.trim();
+    
+    if (!username || !password || !passwordConfirm) {
+        alert(currentLang === 'zh' ? '请填写必填信息' : 'Please fill in required fields');
+        return;
+    }
+    
+    if (username.length < 3) {
+        alert(currentLang === 'zh' ? '用户名至少3个字符' : 'Username must be at least 3 characters');
+        return;
+    }
+    
+    if (password.length < 6) {
+        alert(currentLang === 'zh' ? '密码至少6个字符' : 'Password must be at least 6 characters');
+        return;
+    }
+    
+    if (password !== passwordConfirm) {
+        alert(currentLang === 'zh' ? '两次输入的密码不一致' : 'Passwords do not match');
+        return;
+    }
+    
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        alert(currentLang === 'zh' ? '请输入正确的邮箱地址' : 'Please enter a valid email address');
+        return;
+    }
+    
+    try {
+        const resp = await fetch(`${BASE}/api/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                username, 
+                password, 
+                nickname: nickname || undefined,
+                email: email || undefined
+            })
+        });
+        
+        if (resp.ok) {
+            const data = await resp.json();
+            authToken = data.token;
+            localStorage.setItem('authToken', authToken);
+            currentUser = data.user;
+            updateUserUI();
+            hideLoginModal();
+            
+            // 成功提示
+            setTimeout(() => {
+                alert(currentLang === 'zh' ? 
+                    '✅ 注册成功！\n\n欢迎，' + data.user.nickname + '！' : 
+                    '✅ Registration successful!\n\nWelcome, ' + data.user.nickname + '!');
+            }, 300);
+        } else {
+            const error = await resp.json();
+            alert((currentLang === 'zh' ? '注册失败: ' : 'Registration failed: ') + error.detail);
+        }
+    } catch (error) {
+        alert((currentLang === 'zh' ? '注册失败: ' : 'Registration failed: ') + error.message);
+    }
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -39,7 +265,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load app config
     await loadConfig();
     
-
+    // 检查认证
+    await checkAuth();
+    
+    // 更新UI（显示登录按钮或用户信息）
+    updateUserUI();
+    
+    // 重新创建图标（因为可能添加了新元素）
+    waitForLucide(() => {
+        lucide.createIcons();
+    });
     
     // Load chat history
     loadChatHistory();
@@ -49,6 +284,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     loadCustomModel();
     loadEndpointUrl();
+    
+    // 默认打开心理医生界面
+    openTherapist();
 
     // Update usage quota
     updateUsageQuota();
@@ -79,9 +317,15 @@ async function loadConfig() {
         // Update title
         document.title = currentLang === 'zh' ? config.appName : config.appNameEn;
         
-        // Store daily free limit
+        // Store daily free limit and auth requirement
         dailyFreeLimit = config.dailyFreeLimit || 10;
+        requireAuth = config.requireAuth || false;
+        
+        // 微信登录选项始终显示（点击时会提示是否配置）
+        
         updateUsageQuota();
+        
+        return config;
     } catch (error) {
         console.error('Failed to load config:', error);
     }
@@ -210,41 +454,35 @@ function openTherapist() {
     currentChatId = null;
     messages = [];
     currentAgent = 'therapist';
-    // Exit image generation mode if active and show chat UI
+    
+    // Exit image generation mode if active
     if (showImageGen) {
         showImageGen = false;
-        const chatAreaEl = document.getElementById('chatArea');
         const imageGenAreaEl = document.getElementById('imageGenArea');
         const inputAreaEl = document.getElementById('inputArea');
-        if (chatAreaEl) chatAreaEl.style.display = 'flex';
         if (imageGenAreaEl) imageGenAreaEl.style.display = 'none';
         if (inputAreaEl) inputAreaEl.style.display = 'block';
-        const imageGenBtnEl = document.getElementById('imageGenBtn');
-        if (imageGenBtnEl) imageGenBtnEl.classList.remove('active');
     }
 
-    // Render a welcome-style therapist intro (same structure as newChat)
+    // Render therapist welcome screen
+    document.getElementById('chatArea').style.display = 'flex';
     document.getElementById('chatArea').innerHTML = `
         <div class="welcome-screen">
             <div class="welcome-icon">
-                <i data-lucide="user" style="width: 64px; height: 64px;"></i>
+                <i data-lucide="heart-pulse" style="width: 64px; height: 64px;"></i>
             </div>
-            <h1>心理医生</h1>
+            <h1 data-i18n="psychologist">心理医生</h1>
             <p style="max-width:720px;margin:0 auto;color:var(--text-secondary);line-height:1.6;">
-                欢迎来到心理医生对话。我会倾听并提供情绪调节与放松练习建议，帮助你梳理问题并给出可行的下一步方法。
-                如处于紧急危机或有自伤倾向，请立刻联系当地紧急服务或信任的人。本工具不替代专业治疗。
-                可先用一两句话描述你当前最困扰的事。
+                ${currentLang === 'zh' ? 
+                    '欢迎来到心理医生对话。我会倾听并提供情绪调节与放松练习建议，帮助你梳理问题并给出可行的下一步方法。如处于紧急危机或有自伤倾向，请立刻联系当地紧急服务或信任的人。本工具不替代专业治疗。可先用一两句话描述你当前最困扰的事。' :
+                    'Welcome to the psychologist chat. I will listen and provide emotional regulation and relaxation practice suggestions to help you sort through problems and provide actionable next steps. If you are in an emergency crisis or have self-harm tendencies, please immediately contact local emergency services or a trusted person. This tool does not replace professional treatment. You can start by describing in a sentence or two what is currently troubling you the most.'}
             </p>
         </div>
     `;
 
-    // Button active states
+    // Set button active state
     const therapistBtn = document.getElementById('therapistBtn');
-    const newChatBtn = document.getElementById('newChatBtn');
-    const imageGenBtn = document.getElementById('imageGenBtn');
     if (therapistBtn) therapistBtn.classList.add('active');
-    if (newChatBtn) newChatBtn.classList.remove('active');
-    if (imageGenBtn) imageGenBtn.classList.remove('active');
 
     // Ensure icons render
     if (window.lucide && typeof lucide.createIcons === 'function') {
@@ -431,6 +669,11 @@ async function updateUsageQuota() {
 
 // Send message
 async function sendMessage() {
+    // 检查认证
+    if (requireAuth && !(await checkAuth())) {
+        return;
+    }
+    
     const input = document.getElementById('messageInput');
     if (!input) {
         console.error('messageInput element not found');
@@ -468,7 +711,7 @@ async function sendMessage() {
 
             response = await fetch(`${BASE}/api/agent-completion`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(agentBody)
             });
             
@@ -564,7 +807,7 @@ async function sendMessage() {
 
             response = await fetch(`${BASE}/api/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(requestBody)
             });
             data = await response.json();
@@ -581,14 +824,31 @@ async function sendMessage() {
             
             // Save chat history after successful response
             saveCurrentChat();
+        } else if (response.status === 401) {
+            // 未认证
+            showLoginModal();
+            removeLastMessage();
         } else if (response.status === 429) {
-            // Quota exceeded
-            alert(data.detail || t('quotaExceeded'));
-            // Open settings panel
-            if (!showSettings) {
-                toggleSettings();
+            // 配额用完 - 提示登录或输入API Key
+            removeLastMessage();
+            
+            // 如果未登录，优先提示登录
+            if (!currentUser) {
+                if (confirm(t('quotaExceededLogin') + '\n\n点击"确定"登录，点击"取消"打开设置输入API Key')) {
+                    showLoginModal();
+                } else {
+                    if (!showSettings) {
+                        toggleSettings();
+                    }
+                }
+            } else {
+                // 已登录用户提示输入API Key
+                alert(data.detail || t('quotaExceeded'));
+                if (!showSettings) {
+                    toggleSettings();
+                }
             }
-            return; // Don't add error message to chat
+            return;
         } else {
             messages.push({
                 role: 'assistant',
@@ -697,7 +957,7 @@ async function generateImage() {
         console.log('发送的请求体:', requestBody);
         const response = await fetch(`${BASE}/api/generate-image`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify(requestBody)
         });
         

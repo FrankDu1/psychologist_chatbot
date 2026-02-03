@@ -20,6 +20,58 @@
     </script>
 </head>
 <body>
+        <!-- 登录遮罩层 -->
+        <div class="login-overlay" id="loginOverlay" style="display: none;">
+            <div class="login-modal">
+                <button class="login-close" onclick="hideLoginModal()" title="关闭">
+                    <i data-lucide="x"></i>
+                </button>
+                
+                <!-- 登录表单 -->
+                <div id="loginForm">
+                    <h2 data-i18n="loginTitle">登录</h2>
+                    <p class="login-subtitle" data-i18n="loginSubtitle">输入用户名和密码</p>
+                    
+                    <div class="auth-form">
+                        <input type="text" id="loginUsername" placeholder="用户名" data-i18n-placeholder="username" required>
+                        <input type="password" id="loginPassword" placeholder="密码" data-i18n-placeholder="password" required>
+                        <button class="login-btn" onclick="login()">
+                            <span data-i18n="loginButton">登录</span>
+                        </button>
+                        <div class="login-footer">
+                            <p>
+                                <span data-i18n="noAccount">还没有账号？</span>
+                                <a href="javascript:void(0)" onclick="showRegisterForm()" data-i18n="registerNow">立即注册</a>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 注册表单 -->
+                <div id="registerForm" style="display: none;">
+                    <h2 data-i18n="registerTitle">注册</h2>
+                    <p class="login-subtitle" data-i18n="registerSubtitle">创建新账号</p>
+                    
+                    <div class="auth-form">
+                        <input type="text" id="registerUsername" placeholder="用户名" data-i18n-placeholder="username" required>
+                        <input type="password" id="registerPassword" placeholder="密码" data-i18n-placeholder="password" required>
+                        <input type="password" id="registerPasswordConfirm" placeholder="确认密码" data-i18n-placeholder="confirmPassword" required>
+                        <input type="text" id="registerNickname" placeholder="昵称（可选）" data-i18n-placeholder="nickname">
+                        <input type="email" id="registerEmail" placeholder="邮箱（可选）" data-i18n-placeholder="emailOptional">
+                        <button class="login-btn" onclick="register()">
+                            <span data-i18n="registerButton">注册</span>
+                        </button>
+                        <div class="login-footer">
+                            <p>
+                                <span data-i18n="hasAccount">已有账号？</span>
+                                <a href="javascript:void(0)" onclick="showLoginForm()" data-i18n="loginNow">立即登录</a>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 移动端汉堡菜单按钮 -->
         <button class="icon-button mobile-menu-btn" onclick="toggleSidebar()" style="position:fixed;top:10px;left:10px;z-index:1100;display:none;">
             <i data-lucide="menu"></i>
@@ -34,19 +86,9 @@
                 </div>
             </div>
 
-            <button class="sidebar-button" onclick="newChat()" id="newChatBtn">
-                <i data-lucide="message-square"></i>
-                <span class="btn-text" data-i18n="newChat">新对话</span>
-            </button>
-
             <button class="sidebar-button" onclick="openTherapist()" id="therapistBtn">
-                <i data-lucide="user"></i>
-                <span class="btn-text">心理医生</span>
-            </button>
-
-            <button class="sidebar-button" onclick="toggleImageGen()" id="imageGenBtn">
-                <i data-lucide="image"></i>
-                <span class="btn-text" data-i18n="imageGen">生成图片</span>
+                <i data-lucide="heart-pulse"></i>
+                <span class="btn-text" data-i18n="psychologist">心理医生</span>
             </button>
 
             <!-- Chat History -->
@@ -59,6 +101,12 @@
 
             <div class="sidebar-spacer"></div>
 
+            <!-- 登录按钮（未登录时显示） -->
+            <button class="sidebar-button" onclick="showLoginModal()" id="loginBtn" style="display: none;">
+                <i data-lucide="log-in"></i>
+                <span class="btn-text" data-i18n="login">登录</span>
+            </button>
+
             <!-- Usage Quota -->
             <div class="usage-quota" id="usageQuota" style="display: none;">
                 <div class="quota-text">
@@ -68,11 +116,6 @@
                 <div class="quota-hint" data-i18n="quotaHint">超出后需输入自己的 API Key</div>
             </div>
 
-            <button class="sidebar-button" onclick="toggleSettings()" id="settingsBtn">
-                <i data-lucide="settings"></i>
-                <span class="btn-text" data-i18n="settings">设置</span>
-            </button>
-
             <div class="sidebar-controls">
                 <button class="icon-button" onclick="toggleTheme()" id="themeBtn" title="切换主题">
                     <i data-lucide="moon" id="themeIcon"></i>
@@ -81,73 +124,11 @@
                     <i data-lucide="globe"></i>
                 </button>
             </div>
-            <!-- 新增开源项目入口 -->
-            <div class="sidebar-footer">
-                <a href="https://github.com/FrankDu1/openchatbox" target="_blank" class="sidebar-link" title="开源项目">
-                    <i data-lucide="github"></i>
-                    <span class="footer-text" data-i18n="openSourceProject">开源项目</span>
-                </a>
-            </div>
+
         </div>
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Settings Panel -->
-            <div class="settings-panel" id="settingsPanel" style="display: none;">
-                <button class="settings-close" onclick="toggleSettings()" title="关闭设置">
-                    <i data-lucide="x"></i>
-                </button>
-                <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color);">
-                <div class="settings-group">
-                    <label data-i18n="customEndpointUrl">API 终端地址</label>
-                    <input type="url" id="endpointUrl" placeholder="https://api.openai.com/v1" 
-                        oninput="saveEndpointUrl()" required>
-                    <small data-i18n="endpointHint">输入完整的 API 端点地址</small>
-                </div>
-                <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color);">
-                <div class="settings-group">
-                    <label data-i18n="customApiKey">API Key</label>
-                    <input type="password" id="customApiKey" placeholder="sk-xxx" 
-                        oninput="saveApiKey()" required>
-                    <small data-i18n="apiKeyHint">输入您的 API Key</small>
-                </div>
-                <hr style="margin: 20px 0; border: none; border-top: 1px solid var(--border-color);">
-                <div class="settings-group">
-                    <label data-i18n="modelName">模型名称</label>
-                    <input type="text" id="customModel" placeholder="qwen-plus" 
-                        oninput="saveCustomModel()" required>
-                    <small data-i18n="modelHint">输入要使用的模型名称</small>
-                </div>
-
-                <div class="settings-group">
-                    <label>图片生成 API 终端</label>
-                    <input type="url" id="imageEndpointUrl" placeholder="https://api.openai.com/v1" 
-                        oninput="saveImageEndpointUrl()">
-                    <small>输入图片生成API的完整端点地址</small>
-                </div>
-
-                <div class="settings-group">
-                    <label>图片生成 API Key</label>
-                    <input type="password" id="imageApiKey" placeholder="sk-xxx" 
-                        oninput="saveImageApiKey()">
-                    <small>输入图片生成API的Key（可选，留空使用聊天API配置）</small>
-                </div>
-
-                <div class="settings-group">
-                    <label>图片生成模型</label>
-                    <input type="text" id="imageModel" placeholder="qwen-image-plus" 
-                        oninput="saveImageModel()">
-                    <small>输入图片生成模型的名称，如：dall-e-3, wanx-v1</small>
-                </div>
-
-                <div class="settings-group">
-                    <label>图片尺寸</label>
-                    <input type="text" id="imageSize" placeholder="1024*1024" 
-                        oninput="saveImageSize()" required>
-                    <small>1024*1024, 1328*1328</small>
-                </div>
-            </div>
-
             <!-- Chat Area -->
             <div class="chat-area" id="chatArea">
                 <div class="welcome-screen" id="welcomeScreen">
